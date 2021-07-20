@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #
-#   Copyright 2017 Marco Vermeulen
+#   Copyright 2021 Marco Vermeulen
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 #   limitations under the License.
 #
 
-function __sdk_broadcast {
+function __sdk_broadcast() {
 	if [ "$BROADCAST_OLD_TEXT" ]; then
 		__sdkman_echo_cyan "$BROADCAST_OLD_TEXT"
 	else

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #
-#   Copyright 2017 Marco Vermeulen
+#   Copyright 2021 Marco Vermeulen
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -16,45 +16,70 @@
 #   limitations under the License.
 #
 
-function sdk {
+function sdk() {
 
 	COMMAND="$1"
 	QUALIFIER="$2"
 
 	case "$COMMAND" in
-		l)
-			COMMAND="list";;
-		ls)
-			COMMAND="list";;
-		h)
-			COMMAND="help";;
-		v)
-			COMMAND="version";;
-		u)
-			COMMAND="use";;
-		i)
-			COMMAND="install";;
-		rm)
-			COMMAND="uninstall";;
-		c)
-			COMMAND="current";;
-		ug)
-			COMMAND="upgrade";;
-		d)
-			COMMAND="default";;
-		b)
-			COMMAND="broadcast";;
+	l)
+		COMMAND="list"
+		;;
+	ls)
+		COMMAND="list"
+		;;
+	v)
+		COMMAND="version"
+		;;
+	u)
+		COMMAND="use"
+		;;
+	i)
+		COMMAND="install"
+		;;
+	rm)
+		COMMAND="uninstall"
+		;;
+	c)
+		COMMAND="current"
+		;;
+	ug)
+		COMMAND="upgrade"
+		;;
+	d)
+		COMMAND="default"
+		;;
+	b)
+		COMMAND="broadcast"
+		;;
+	h)
+		COMMAND="home"
+		;;
+	e)
+		COMMAND="env"
+		;;
 	esac
+
+	if [[ "$COMMAND" == "home" ]]; then
+		__sdk_home "$QUALIFIER" "$3"
+		return $?
+	fi
+
+	# Left here for legacy purposes, issue #912 on Github
+	if [[ "$COMMAND" == "completion" ]]; then
+		return 0
+	fi
 
 	#
 	# Various sanity checks and default settings
 	#
 
-	# Check version and candidates cache
+	# Check candidates cache
 	if [[ "$COMMAND" != "update" ]]; then
 		___sdkman_check_candidates_cache "$SDKMAN_CANDIDATES_CACHE" || return 1
-		___sdkman_check_version_cache
 	fi
+	# Check version cache
+	___sdkman_check_version_cache
 
 	# Always presume internet availability
 	SDKMAN_AVAILABLE="true"
@@ -91,13 +116,15 @@ function sdk {
 
 	# couldn't find the command
 	if [[ -z "$CMD_FOUND" ]]; then
-		echo "Invalid command: $COMMAND"
+		echo ""
+		__sdkman_echo_red "Invalid command: $COMMAND"
+		echo ""
 		__sdk_help
 	fi
 
 	# Check whether the candidate exists
 	local sdkman_valid_candidate=$(echo ${SDKMAN_CANDIDATES[@]} | grep -w "$QUALIFIER")
-	if [[ -n "$QUALIFIER" && "$COMMAND" != "offline" && "$COMMAND" != "flush" && "$COMMAND" != "selfupdate" && -z "$sdkman_valid_candidate" ]]; then
+	if [[ -n "$QUALIFIER" && "$COMMAND" != "offline" && "$COMMAND" != "flush" && "$COMMAND" != "selfupdate" && "$COMMAND" != "env" && "$COMMAND" != "completion" && "$COMMAND" != "edit" && -z "$sdkman_valid_candidate" ]]; then
 		echo ""
 		__sdkman_echo_red "Stop! $QUALIFIER is not a valid candidate."
 		return 1
@@ -126,7 +153,7 @@ function sdk {
 	fi
 
 	# Attempt upgrade after all is done
-	if [[ "$COMMAND" != "selfupdate" ]]; then
+	if [[ "$COMMAND" != "selfupdate" && "$sdkman_selfupdate_enable" == true ]]; then
 		__sdkman_auto_update "$SDKMAN_REMOTE_VERSION" "$SDKMAN_VERSION"
 	fi
 	return $final_rc

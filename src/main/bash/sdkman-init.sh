@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #
-#   Copyright 2017 Marco Vermeulen
+#   Copyright 2021 Marco Vermeulen
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -29,15 +29,65 @@ if [ -z "$SDKMAN_DIR" ]; then
 	export SDKMAN_DIR="$HOME/.sdkman"
 fi
 
-# infer platform
-SDKMAN_PLATFORM="$(uname)"
-if [[ "$SDKMAN_PLATFORM" == 'Linux' ]]; then
-	if [[ "$(uname -m)" == 'i686' ]]; then
-		SDKMAN_PLATFORM+='32'
-	else
-		SDKMAN_PLATFORM+='64'
-	fi
+# Load the sdkman config if it exists.
+if [ -f "${SDKMAN_DIR}/etc/config" ]; then
+	source "${SDKMAN_DIR}/etc/config"
 fi
+
+# infer platform
+function infer_platform() {
+	local kernel
+	local machine
+	
+	kernel="$(uname -s)"
+	machine="$(uname -m)"
+	
+	case $kernel in
+	Linux)
+	  case $machine in
+	  i686)
+		echo "LinuxX32"
+		;;
+	  x86_64)
+		echo "LinuxX64"
+		;;
+	  armv7l)
+		echo "LinuxARM32"
+		;;
+	  armv8l)
+		echo "LinuxARM64"
+		;;
+	  aarch64)
+		echo "LinuxARM64"
+		;;
+	  *)
+	  	echo "LinuxX64"
+	  	;;
+	  esac
+	  ;;
+	Darwin)
+	  case $machine in
+	  x86_64)
+		echo "DarwinX64"
+		;;
+	  arm64)
+		if [[ "$sdkman_rosetta2_compatible" == 'true' ]]; then
+			echo "DarwinX64"
+		else
+			echo "DarwinARM64"
+		fi
+		;;
+	  *)
+	  	echo "DarwinX64"
+	  	;;
+	  esac
+	  ;;
+	*)
+	  echo "$kernel"
+	esac
+}
+
+SDKMAN_PLATFORM="$(infer_platform | tr '[:upper:]' '[:lower:]')"
 export SDKMAN_PLATFORM
 
 # OS specific support (must be 'true' or 'false').
@@ -45,7 +95,8 @@ cygwin=false
 darwin=false
 solaris=false
 freebsd=false
-case "${SDKMAN_PLATFORM}" in
+SDKMAN_KERNEL="$(uname -s)"
+case "${SDKMAN_KERNEL}" in
 	CYGWIN*)
 		cygwin=true
 		;;
@@ -65,7 +116,7 @@ bash_shell=false
 
 if [[ -n "$ZSH_VERSION" ]]; then
 	zsh_shell=true
-else
+elif [[ -n "$BASH_VERSION" ]]; then
 	bash_shell=true
 fi
 
@@ -77,17 +128,12 @@ fi
 # <https://github.com/sdkman/sdkman-extensions>.
 OLD_IFS="$IFS"
 IFS=$'\n'
-scripts=($(find "${SDKMAN_DIR}/src" "${SDKMAN_DIR}/ext" -type f -name 'sdkman-*'))
+scripts=($(find "${SDKMAN_DIR}/src" "${SDKMAN_DIR}/ext" -type f -name 'sdkman-*.sh'))
 for f in "${scripts[@]}"; do
 	source "$f"
 done
 IFS="$OLD_IFS"
-unset scripts f
-
-# Load the sdkman config if it exists.
-if [ -f "${SDKMAN_DIR}/etc/config" ]; then
-	source "${SDKMAN_DIR}/etc/config"
-fi
+unset OLD_IFS scripts f
 
 # Create upgrade delay file if it doesn't exist
 if [[ ! -f "${SDKMAN_DIR}/var/delay_upgrade" ]]; then
@@ -107,17 +153,14 @@ if [[ -z "${sdkman_curl_retry_max_time}" ]]; then sdkman_curl_retry_max_time=60;
 # set curl to continue downloading automatically
 if [[ -z "${sdkman_curl_continue}" ]]; then sdkman_curl_continue=true; fi
 
-# Read list of candidates and set array
+# read list of candidates and set array
 SDKMAN_CANDIDATES_CACHE="${SDKMAN_DIR}/var/candidates"
 SDKMAN_CANDIDATES_CSV=$(<"$SDKMAN_CANDIDATES_CACHE")
 __sdkman_echo_debug "Setting candidates csv: $SDKMAN_CANDIDATES_CSV"
 if [[ "$zsh_shell" == 'true' ]]; then
 	SDKMAN_CANDIDATES=(${(s:,:)SDKMAN_CANDIDATES_CSV})
 else
-	OLD_IFS="$IFS"
-	IFS=","
-        SDKMAN_CANDIDATES=(${SDKMAN_CANDIDATES_CSV})
-	IFS="$OLD_IFS"
+	IFS=',' read -a SDKMAN_CANDIDATES <<< "${SDKMAN_CANDIDATES_CSV}"
 fi
 
 export SDKMAN_CANDIDATES_DIR="${SDKMAN_DIR}/candidates"
@@ -129,5 +172,50 @@ for candidate_name in "${SDKMAN_CANDIDATES[@]}"; do
 		__sdkman_prepend_candidate_to_path "$candidate_dir"
 	fi
 done
-unset OLD_IFS candidate_name candidate_dir
+unset candidate_name candidate_dir
 export PATH
+
+# source completion scripts
+if [[ "$sdkman_auto_complete" == 'true' ]]; then
+	if [[ "$zsh_shell" == 'true' ]]; then
+		autoload -Uz compinit
+		compinit
+		source "${SDKMAN_DIR}/contrib/completion/zsh/sdk"
+		__sdkman_echo_debug "ZSH completion script loaded..."
+	elif [[ "$bash_shell" == 'true' ]]; then
+		source "${SDKMAN_DIR}/contrib/completion/bash/sdk"
+		__sdkman_echo_debug "Bash completion script loaded..."
+	else
+		__sdkman_echo_debug "No completion scripts found for $SHELL"
+	fi
+fi
+
+if [[ "$sdkman_auto_env" == "true" ]]; then
+	if [[ "$zsh_shell" == "true" ]]; then
+		function sdkman_auto_env() {
+			if [[ -n $SDKMAN_ENV ]] && [[ ! $PWD =~ ^$SDKMAN_ENV ]]; then
+				sdk env clear
+			fi
+			if [[ -f .sdkmanrc ]]; then
+				sdk env
+			fi
+		}
+
+		chpwd_functions+=(sdkman_auto_env)
+	else
+		function sdkman_auto_env() {
+			if [[ -n $SDKMAN_ENV ]] && [[ ! $PWD =~ ^$SDKMAN_ENV ]]; then
+				sdk env clear
+			fi
+			if [[ "$SDKMAN_OLD_PWD" != "$PWD" ]] && [[ -f ".sdkmanrc" ]]; then
+				sdk env
+			fi
+
+			export SDKMAN_OLD_PWD="$PWD"
+		}
+
+		[[ -z "$PROMPT_COMMAND" ]] && PROMPT_COMMAND="sdkman_auto_env" || PROMPT_COMMAND="${PROMPT_COMMAND%\;};sdkman_auto_env"
+	fi
+
+	sdkman_auto_env
+fi

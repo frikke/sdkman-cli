@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 #
-#   Copyright 2017 Marco Vermeulen
+#   Copyright 2021 Marco Vermeulen
 #
 #   Licensed under the Apache License, Version 2.0 (the "License");
 #   you may not use this file except in compliance with the License.
@@ -16,25 +16,24 @@
 #   limitations under the License.
 #
 
-function __sdk_selfupdate {
+function __sdk_selfupdate() {
 	local force_selfupdate
 
 	force_selfupdate="$1"
 	if [[ "$SDKMAN_AVAILABLE" == "false" ]]; then
 		echo "This command is not available while offline."
-
 	elif [[ "$SDKMAN_REMOTE_VERSION" == "$SDKMAN_VERSION" && "$force_selfupdate" != "force" ]]; then
 		echo "No update available at this time."
-
 	else
 		export sdkman_debug_mode
 		export sdkman_beta_channel
 		__sdkman_secure_curl "${SDKMAN_CANDIDATES_API}/selfupdate?beta=${sdkman_beta_channel}" | bash
 	fi
+
 	unset SDKMAN_FORCE_SELFUPDATE
 }
 
-function __sdkman_auto_update {
+function __sdkman_auto_update() {
 	local remote_version version delay_upgrade
 
 	remote_version="$1"
@@ -49,12 +48,14 @@ function __sdkman_auto_update {
 		__sdkman_echo_no_colour "The current version is $remote_version, but you have $version."
 		echo ""
 
-		if [[ "$sdkman_auto_selfupdate" != "true" ]]; then
+		if [[ "$sdkman_auto_answer" == false ]]; then
 			__sdkman_echo_confirm "Would you like to upgrade now? (Y/n): "
 			read upgrade
 		fi
 
-		if [[ -z "$upgrade" ]]; then upgrade="Y"; fi
+		if [[ -z "$upgrade" ]]; then
+			upgrade="Y"
+		fi
 
 		if [[ "$upgrade" == "Y" || "$upgrade" == "y" ]]; then
 			__sdk_selfupdate
@@ -65,5 +66,4 @@ function __sdkman_auto_update {
 
 		touch "$delay_upgrade"
 	fi
-
 }

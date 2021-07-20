@@ -1,125 +1,116 @@
-import org.apache.tools.ant.filters.*
+import org.apache.tools.ant.filters.ReplaceTokens
 
-buildscript {
-    repositories {
-        jcenter()
-    }
-}
+import static org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
 
 plugins {
-    id "com.jfrog.bintray" version "1.7"
+	id('groovy')
 }
 
-apply plugin: 'groovy'
-
-def userHome = System.getProperty('user.home')
+String userHome = System.getProperty('user.home')
 ext.installBinDir = "${userHome}/.sdkman/bin"
 ext.installSrcDir = "${userHome}/.sdkman/src"
+ext.installContribDir = "${userHome}/.sdkman/contrib"
 
-def loadConfiguration() {
-    def environment = hasProperty('env') ? env : 'local'
-    ext.environment = environment
-    println "Environment is set to: $environment"
-    
-    def configFile = file('config.groovy')
-    def config = new ConfigSlurper(environment).parse(configFile.toURL())
-    ext.config = config
-}
+ext.environment = hasProperty('env') ? env : 'local'
+ext.hash = hasProperty('hash') ? hash : 'hashme'
+ext.release = hasProperty('release') ? release : 'latest'
+ext.candidatesApi = ext.environment == 'production' ? 'https://api.sdkman.io/2' : 'http://localhost:8080/2'
 
-loadConfiguration()
+ext.sdkmanVersion = ext.release == 'latest' ? "latest+${ext.hash}".toString() : ext.release
 
-ext.buildNumber = System.getenv("TRAVIS_BUILD_NUMBER") ?: '0'
-ext.sdkmanCliBuildVersion = "${config.sdkmanCliVersion}+${buildNumber}".toString()
+println("Environment is set to: $environment")
+println("Short git hash: $hash")
+println("Release set to: $release")
+println("Candidtes API: $candidatesApi")
+println("Version: $sdkmanVersion")
 
 repositories {
-    jcenter()
+	mavenCentral()
 }
 
 dependencies {
-    compile 'org.codehaus.groovy:groovy:2.4.17'
-    compile 'org.codehaus.groovy:groovy-templates:2.4.17'
-    compile 'org.codehaus.groovy:groovy-json:2.4.17'
-    testCompile 'junit:junit:4.12'
-    testCompile 'io.cucumber:cucumber-groovy:4.7.1'
-    testCompile 'io.cucumber:cucumber-junit:4.7.1'
-    testCompile 'io.cucumber:gherkin:5.1.0'
-    testCompile('org.spockframework:spock-core:1.3-groovy-2.4') {
-        exclude module: 'groovy-all'
-    }
-    testCompile('com.github.tomakehurst:wiremock:2.25.1') {
-        exclude module: 'junit'
-    }
-    testCompile group: 'org.slf4j', name: 'slf4j-simple', version: '1.7.29'
-    testCompile group: 'org.slf4j', name: 'slf4j-api', version: '1.7.29'
+	testImplementation('com.github.tomakehurst:wiremock:2.25.1') {
+		exclude(module: 'junit')
+	}
+	testImplementation('io.cucumber:cucumber-groovy:4.7.1')
+	testImplementation('io.cucumber:cucumber-junit:4.7.4')
+	testImplementation('io.cucumber:gherkin:5.2.0')
+	testImplementation('junit:junit:4.13')
+	testImplementation('org.codehaus.groovy:groovy:2.4.19')
+	testImplementation('org.codehaus.groovy:groovy-json:2.4.19')
+	testImplementation('org.codehaus.groovy:groovy-templates:2.4.19')
+	testImplementation('org.slf4j:slf4j-api:1.7.30')
+	testImplementation('org.slf4j:slf4j-simple:1.7.30')
+	testImplementation('org.spockframework:spock-core:1.3-groovy-2.4') {
+		exclude(module: 'groovy-all')
+	}
 }
-
-test.testLogging.exceptionFormat = 'full'
 
 task prepareScripts(type: Copy) {
-    from 'src/main/bash'
-    into 'build/scripts'
-    include '**/*'
-    filter(ReplaceTokens, tokens:
-            [
-                    SDKMAN_VERSION: sdkmanCliBuildVersion,
-                    SDKMAN_CANDIDATES_API: config.candidatesApi
-            ]
-    )
+	from('src/main/bash')
+	into('build/scripts')
+	include('**/*')
+	filter(
+			ReplaceTokens,
+			tokens: [
+					SDKMAN_VERSION       : sdkmanVersion,
+					SDKMAN_CANDIDATES_API: candidatesApi
+			]
+	)
 }
 
-test.dependsOn prepareScripts
-
-task assembleArchive(type: Zip, dependsOn: prepareScripts) {
-  appendix = "cli"
-  version = sdkmanCliBuildVersion
-    from "build/scripts"
-    include "*.sh*"
+task prepareContrib(type: Copy) {
+	from('contrib')
+	into('build/contrib')
 }
 
-assemble.dependsOn assembleArchive
+tasks.test.configure {
+	dependsOn(prepareScripts)
+	testLogging.exceptionFormat = FULL
+}
+
+task assembleArchive(type: Zip, dependsOn: [prepareScripts, prepareContrib]) {
+	archiveVersion = sdkmanVersion
+	from('build/scripts') {
+		include('*.sh*')
+	}
+	from('build') {
+		include('contrib/**')
+	}
+}
+
+tasks.assemble.configure {
+	dependsOn(assembleArchive)
+}
 
 task cleanInstallInit(type: Delete) {
-    delete installBinDir
+	delete(installBinDir)
+}
+
+task cleanContribInit(type: Delete) {
+	delete(installContribDir)
 }
 
 task cleanInstallModules(type: Delete) {
-    delete installSrcDir
+	delete(installSrcDir)
+}
+
+task installContrib(type: Copy, dependsOn: [cleanContribInit, prepareContrib]) {
+	from('build/contrib')
+	into(installContribDir)
 }
 
 task installInit(type: Copy, dependsOn: [cleanInstallInit, prepareScripts]) {
-    from "build/scripts"
-    into installBinDir
-    include "sdkman-init.sh"
+	from('build/scripts')
+	into(installBinDir)
+	include('sdkman-init.sh')
 }
 
 task installModules(type: Copy, dependsOn: [cleanInstallModules, prepareScripts]) {
-    from "build/scripts"
-    into installSrcDir
-    include "sdkman-*.sh"
-    exclude "sdkman-init.sh"
+	from('build/scripts')
+	into(installSrcDir)
+	include('sdkman-*.sh')
+	exclude('sdkman-init.sh')
 }
 
-task install(dependsOn: [installInit, installModules])
-
-bintray {
-    user = System.getenv('BINTRAY_USERNAME')
-    key = System.getenv('BINTRAY_API_KEY')
-    publish = true
-    filesSpec {
-        from 'build/distributions'
-        into '.'
-    }
-    pkg {
-        repo = 'generic'
-        name = 'sdkman-cli'
-        userOrg = 'sdkman'
-        licenses = ['Apache-2.0']
-        vcsUrl = 'https://github.com/sdkman/sdkman-cli.git'
-        version {
-            name = sdkmanCliBuildVersion
-            desc = 'Binary zip distribution of SDKMAN bash client.'
-            released  = new Date()
-        }
-    }
-}
-
+task install(dependsOn: [installInit, installContrib, installModules])
